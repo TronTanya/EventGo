@@ -1,0 +1,14 @@
+{
+  "name": "eventgo-portable",
+  "version": "1.4.0",
+  "private": true,
+  "type": "module",
+  "description": "EventGo — переносимый сервис для организации мероприятий",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "start": "node server.mjs --open",
+    "test": "node --test tests/*.test.mjs"
+  }
+}
