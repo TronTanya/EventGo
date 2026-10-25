@@ -96,3 +96,4 @@ html:has(.app-shell){scrollbar-gutter:stable}
 .task-row:hover,.data-table tbody tr:hover,.activity-row:hover,.program-item:hover{background:#faf8ff}
 .kanban-card:hover,.person-card:hover,.catalog-card:hover{border-color:#d9cdfd;box-shadow:0 8px 22px #2a16500c}
 .metric{transition:border-color .18s ease-out,box-shadow .18s ease-out}.metric:hover{border-color:#e0d9f2;box-shadow:0 6px 18px #2a16500a}
+@media(max-width:760px){.panel-head .text-button{white-space:nowrap;flex:none}}
