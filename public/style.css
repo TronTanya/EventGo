@@ -90,3 +90,9 @@ html:has(.app-shell){scrollbar-gutter:stable}
 .event-card:hover,.event-card:focus-within{border-color:#d9cdfd;box-shadow:0 12px 30px #2a165014}.event-card:hover{transform:translateY(-2px)}
 .search,.field input,.field select,.field textarea,.survey-link input,.survey-field textarea,.chat-composer textarea,.ai-composer>textarea,.event-switch,.status-select{transition:border-color .18s ease-out,box-shadow .18s ease-out}
 .search:focus-within,.field input:focus-visible,.field select:focus-visible,.field textarea:focus-visible,.survey-link input:focus-visible,.survey-field textarea:focus-visible,.chat-composer textarea:focus-visible,.ai-composer>textarea:focus-visible,.event-switch:focus-visible,.status-select:focus-visible{outline:2px solid transparent;outline-offset:0;border-color:var(--purple);box-shadow:0 0 0 3px #f0ebff}
+.button,.icon-button,.text-button,.nav-item,.tab,.seg-btn,.task-check,.task-name,.notice-item,.template-card,.upload-zone,.ai-suggestions>button,.catalog-card,.compare-chip button,.kanban-card,.person-card,.gantt-label,.calendar-event{transition:background-color .18s ease-out,border-color .18s ease-out,color .18s ease-out,box-shadow .18s ease-out,transform .18s ease-out,opacity .18s ease-out}
+.button{transition:background-color .18s ease-out,border-color .18s ease-out,color .18s ease-out,box-shadow .18s ease-out,transform .18s ease-out}
+.task-row,.data-table tbody tr,.activity-row,.program-item{transition:background-color .18s ease-out}
+.task-row:hover,.data-table tbody tr:hover,.activity-row:hover,.program-item:hover{background:#faf8ff}
+.kanban-card:hover,.person-card:hover,.catalog-card:hover{border-color:#d9cdfd;box-shadow:0 8px 22px #2a16500c}
+.metric{transition:border-color .18s ease-out,box-shadow .18s ease-out}.metric:hover{border-color:#e0d9f2;box-shadow:0 6px 18px #2a16500a}
