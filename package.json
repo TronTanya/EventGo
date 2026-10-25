@@ -1,6 +1,6 @@
 {
   "name": "eventgo-portable",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "private": true,
   "type": "module",
   "description": "EventGo — переносимый сервис для организации мероприятий",
@@ -9,6 +9,10 @@
   },
   "scripts": {
     "start": "node server.mjs --open",
+    "start:docker": "docker compose up --build",
     "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "pg": "^8.16.3"
   }
 }

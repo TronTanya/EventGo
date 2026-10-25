@@ -1,0 +1,13 @@
+node_modules
+runtime
+data
+.git
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+Отчёт_тестирования_EventGo.md
+ТЗ_проверки_и_доработки_EventGo.md
+Защита_EventGo.md
+НАЧНИТЕ ЗДЕСЬ.txt
+ОБНОВЛЕНИЕ.txt
+.pg-seed

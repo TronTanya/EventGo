@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     branch: main
-    buildCommand: "true"
+    buildCommand: npm ci --omit=dev
     startCommand: node server.mjs
     envVars:
       - key: NODE_VERSION

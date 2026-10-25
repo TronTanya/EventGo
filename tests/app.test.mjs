@@ -150,7 +150,7 @@ test('EventGo: persistent data, roles, registration, files and exports',async t=
  });
  await t.test('date warnings for past events and tasks due after the event',async()=>{
    const baseEvent={title:'Проверка дат',type:'Встреча',location:'Зал',capacity:10,budget:0};
-   const past=await request('/events',{method:'POST',cookie:org,data:{...baseEvent,starts_at:'2020-01-01T10:00'}});assert.equal(past.status,201);assert.equal(past.body.warnings.length,1);assert.match(past.body.warnings[0],/прошла/);
+   const past=await request('/events',{method:'POST',cookie:org,data:{...baseEvent,starts_at:'2020-01-01T10:00'}});assert.equal(past.status,201);assert.equal(past.body.status,'finished');assert.equal(past.body.warnings.length,2);assert.match(past.body.warnings[0],/прошла/);assert.match(past.body.warnings[1],/Завершено/);
    const future=await request('/events',{method:'POST',cookie:org,data:{...baseEvent,starts_at:'2026-12-01T10:00'}});assert.equal(future.status,201);assert.deepEqual(future.body.warnings,[]);const id=future.body.id;
    const early=await request(`/events/${id}/tasks`,{method:'POST',cookie:org,data:{title:'До события',due_date:'2026-11-25'}});assert.deepEqual(early.body.warnings,[]);
    const late=await request(`/events/${id}/tasks`,{method:'POST',cookie:org,data:{title:'После события',due_date:'2027-05-01'}});assert.equal(late.status,201);assert.equal(late.body.warnings.length,1);assert.match(late.body.warnings[0],/позже даты мероприятия/);
@@ -159,6 +159,50 @@ test('EventGo: persistent data, roles, registration, files and exports',async t=
    const moved=await request('/events/'+id,{method:'PATCH',cookie:org,data:{starts_at:'2026-11-20T10:00'}});assert.equal(moved.status,200);assert.ok(moved.body.warnings.some(w=>w.includes('Незавершённых задач')));
    assert.deepEqual((await request('/events/'+id,{method:'PATCH',cookie:org,data:{title:'Без смены даты'}})).body.warnings,[]);
    for(const eventId of [past.body.id,id])assert.equal((await request('/events/'+eventId,{method:'DELETE',cookie:org})).status,200);
+ });
+ await t.test('past events finish automatically and leave the afisha',async()=>{
+   const at=offset=>new Date(Date.now()+9*3600000+offset).toISOString().slice(0,16),hour=3600000;
+   const baseEvent={title:'Автозавершение',type:'Встреча',location:'Зал',capacity:10,budget:0};
+   assert.equal((await request('/events',{method:'POST',cookie:org,data:{...baseEvent,starts_at:'2026-12-01T10:00',ends_at:'2026-12-01T09:00'}})).status,400);
+   const old=await request('/events',{method:'POST',cookie:org,data:{...baseEvent,starts_at:'2020-01-01T10:00',status:'active'}});assert.equal(old.status,201);assert.equal(old.body.status,'finished');
+   const created=await request('/events',{method:'POST',cookie:org,data:{...baseEvent,title:'Двухдневное событие',starts_at:at(-hour),ends_at:at(24*hour),status:'planning'}});assert.equal(created.status,201);assert.deepEqual(created.body.warnings,[]);const id=created.body.id;
+   let e=(await request('/events/'+id,{cookie:org})).body.event;assert.equal(e.status,'active');
+   assert.ok((await request('/afisha')).body.some(x=>x.title==='Двухдневное событие'));assert.ok(!(await request('/afisha')).body.some(x=>x.public_token===undefined||x.title==='Автозавершение'));
+   assert.equal((await request('/public/'+e.public_token,{method:'POST',data:{name:'Гость Вовремя',email:'ontime@example.com',consent:true}})).status,201);
+   const raw=new DatabaseSync(join(directory,'eventgo.sqlite'));raw.prepare('UPDATE events SET ends_at=? WHERE id=?').run(at(-60000),id);raw.close();
+   e=(await request('/events/'+id,{cookie:org})).body.event;assert.equal(e.status,'finished');
+   assert.ok(!(await request('/afisha')).body.some(x=>x.title==='Двухдневное событие'));
+   assert.equal((await request('/public/'+e.public_token)).body.event.registration_open,false);
+   assert.equal((await request('/public/'+e.public_token,{method:'POST',data:{name:'Гость Поздно',email:'late@example.com',consent:true}})).status,409);
+   const check=new DatabaseSync(join(directory,'eventgo.sqlite'),{readOnly:true});const log=check.prepare('SELECT actor,text FROM activities WHERE event_id=? ORDER BY id').all(id).map(a=>a.actor+': '+a.text);check.close();
+   assert.ok(log.some(x=>x.startsWith('EventGo: перевёл мероприятие в статус «Идёт сейчас»')));assert.equal(log.filter(x=>x.startsWith('EventGo: завершил мероприятие автоматически')).length,1);
+   const reopen=await request('/events/'+id,{method:'PATCH',cookie:org,data:{status:'active'}});assert.equal(reopen.status,200);assert.equal(reopen.body.status,'finished');assert.ok(reopen.body.warnings.some(w=>w.includes('перенесите дату окончания')));
+   const extended=await request('/events/'+id,{method:'PATCH',cookie:org,data:{status:'active',ends_at:at(48*hour)}});assert.equal(extended.body.status,'active');assert.deepEqual(extended.body.warnings,[]);
+   assert.equal((await request('/events/'+id,{cookie:org})).body.event.status,'active');
+   for(const eventId of [old.body.id,id])assert.equal((await request('/events/'+eventId,{method:'DELETE',cookie:org})).status,200);
+ });
+ await t.test('contractor cost is linked to a budget expense in both directions',async()=>{
+   const seeded=(await request('/events/1',{cookie:org})).body;const catering=seeded.team.find(p=>p.name==='Северный кейтеринг');assert.equal(seeded.expenses.find(x=>x.contractor_id===catering.id).name,'Кофе-брейк и обед');
+   const created=await request('/events',{method:'POST',cookie:org,data:{title:'Бюджет подрядчиков',type:'Встреча',starts_at:'2026-12-15T10:00',location:'Зал',capacity:50,budget:50000}});const id=created.body.id;
+   const expenses=async()=>(await request('/events/'+id,{cookie:org})).body.expenses;
+   const sound=await request(`/events/${id}/team`,{method:'POST',cookie:org,data:{name:'Звук Плюс',role:'Оборудование',kind:'contractor',service:'Звук и свет',cost:30000,status:'pending'}});assert.equal(sound.status,201);assert.equal(sound.body.budget,'created');
+   let list=await expenses();assert.equal(list.length,1);assert.deepEqual([list[0].name,list[0].category,list[0].planned,list[0].actual,list[0].contractor_id],['Оборудование: Звук Плюс','Оборудование',30000,0,sound.body.id]);
+   const team=await request(`/events/${id}/team`,{method:'POST',cookie:org,data:{name:'Волонтёр',role:'Регистрация',kind:'team',cost:0}});assert.equal(team.body.budget,'none');
+   const offBudget=await request(`/events/${id}/team`,{method:'POST',cookie:org,data:{name:'Фотограф',role:'Съёмка',kind:'contractor',cost:15000,in_budget:false}});assert.equal(offBudget.body.budget,'none');assert.equal((await expenses()).length,1);
+   const raised=await request('/team/'+sound.body.id,{method:'PATCH',cookie:org,data:{name:'Звук Плюс Про',cost:60000}});assert.equal(raised.body.budget,'updated');assert.ok(raised.body.warnings.some(w=>w.includes('превышают бюджет')));
+   list=await expenses();assert.equal(list[0].planned,60000);assert.equal(list[0].name,'Оборудование: Звук Плюс Про');
+   assert.equal((await request('/expenses/'+list[0].id,{method:'PATCH',cookie:org,data:{planned:45000,actual:20000}})).body.contractor_synced,true);
+   assert.equal((await request('/events/'+id,{cookie:org})).body.team.find(p=>p.id===sound.body.id).cost,45000);
+   const added=await request('/team/'+offBudget.body.id,{method:'PATCH',cookie:org,data:{in_budget:true,expense_category:'Другое'}});assert.equal(added.body.budget,'created');
+   assert.equal((await request('/team/'+offBudget.body.id,{method:'PATCH',cookie:org,data:{status:'active'}})).body.budget,'linked');
+   assert.equal((await request('/team/'+offBudget.body.id,{method:'PATCH',cookie:org,data:{in_budget:false}})).body.budget,'removed');
+   assert.equal((await request('/team/'+offBudget.body.id,{method:'PATCH',cookie:org,data:{cost:16000}})).body.budget,'none');
+   assert.equal((await request('/team/'+sound.body.id,{method:'DELETE',cookie:org})).body.budget,'kept');
+   list=await expenses();assert.equal(list.length,1);assert.equal(list[0].contractor_id,null);assert.equal(list[0].actual,20000);
+   const lighting=await request(`/events/${id}/team`,{method:'POST',cookie:org,data:{name:'Свет',role:'Оборудование',kind:'contractor',cost:5000}});
+   assert.equal((await request('/team/'+lighting.body.id,{method:'DELETE',cookie:org})).body.budget,'removed');assert.equal((await expenses()).length,1);
+   assert.equal((await request(`/events/${id}/team`,{method:'POST',cookie:member,data:{name:'Чужой',role:'x',kind:'contractor',cost:1}})).status,403);
+   assert.equal((await request('/events/'+id,{method:'DELETE',cookie:org})).status,200);
  });
  await t.test('catalog: search data, compare fields and one-click add to event',async()=>{
    assert.equal((await request('/catalog',{cookie:member})).status,403);
@@ -177,7 +221,7 @@ test('EventGo: persistent data, roles, registration, files and exports',async t=
    const catering=list.body.find(c=>c.name==='Северный кейтеринг');
    const add=await request(`/events/${id}/catalog`,{method:'POST',cookie:org,data:{item_id:catering.id}});assert.equal(add.status,201);assert.equal(add.body.estimate,150000);assert.ok(add.body.warnings.some(w=>/бюджет/i.test(w)));
    const afterTeam=(await request('/events/'+id,{cookie:org})).body;const person=afterTeam.team.find(p=>p.kind==='contractor'&&p.name==='Северный кейтеринг');
-   assert.ok(person);assert.equal(person.cost,150000);assert.equal(person.status,'pending');assert.ok(afterTeam.expenses.some(x=>x.name.includes('Северный кейтеринг')&&x.planned===150000&&x.category==='Кейтеринг'));
+   assert.ok(person);assert.equal(person.cost,150000);assert.equal(person.status,'pending');assert.ok(afterTeam.expenses.some(x=>x.name.includes('Северный кейтеринг')&&x.planned===150000&&x.category==='Кейтеринг'&&x.contractor_id===person.id));
    assert.equal((await request(`/events/${id}/catalog`,{method:'POST',cookie:org,data:{item_id:catering.id}})).status,409);
    assert.equal((await request('/catalog/'+created.body.id,{method:'DELETE',cookie:org})).status,200);
    assert.equal((await request('/events/'+id,{method:'DELETE',cookie:org})).status,200);
@@ -433,6 +477,6 @@ test('chat migration preserves existing accounts, events and files',async()=>{
    let db=openDatabase(folder);db.exec("DROP TABLE chat_messages; PRAGMA user_version=1; UPDATE events SET title='Существующее мероприятие' WHERE id=1");
    const before={events:db.prepare('SELECT count(*) n FROM events').get().n,users:db.prepare('SELECT count(*) n FROM users').get().n,files:db.prepare('SELECT count(*) n FROM files').get().n};db.close();
    db=openDatabase(folder);
-   try{assert.equal(db.prepare('PRAGMA user_version').get().user_version,11);assert.ok(db.prepare('PRAGMA table_info(events)').all().some(c=>c.name==='expected_guests'));assert.equal(db.prepare('SELECT title FROM events WHERE id=1').get().title,'Существующее мероприятие');for(const table of ['events','users','files'])assert.equal(db.prepare(`SELECT count(*) n FROM ${table}`).get().n,before[table]);assert.equal(db.prepare('SELECT count(*) n FROM chat_messages').get().n,0);assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='program_items'").get());assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='surveys'").get());assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='registration_fields'").get());assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='catalog_items'").get());assert.ok(db.prepare('SELECT count(*) n FROM catalog_items').get().n>=10);assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='outbox'").get());assert.equal(db.prepare('SELECT count(*) n FROM announcements WHERE event_id=1').get().n,1);}finally{db.close();}
+   try{assert.equal(db.prepare('PRAGMA user_version').get().user_version,13);assert.ok(db.prepare('PRAGMA table_info(expenses)').all().some(c=>c.name==='contractor_id'));assert.ok(db.prepare('PRAGMA table_info(events)').all().some(c=>c.name==='expected_guests'));assert.ok(db.prepare('PRAGMA table_info(events)').all().some(c=>c.name==='ends_at'));assert.equal(db.prepare('SELECT title FROM events WHERE id=1').get().title,'Существующее мероприятие');for(const table of ['events','users','files'])assert.equal(db.prepare(`SELECT count(*) n FROM ${table}`).get().n,before[table]);assert.equal(db.prepare('SELECT count(*) n FROM chat_messages').get().n,0);assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='program_items'").get());assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='surveys'").get());assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='registration_fields'").get());assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='catalog_items'").get());assert.ok(db.prepare('SELECT count(*) n FROM catalog_items').get().n>=10);assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='outbox'").get());assert.equal(db.prepare('SELECT count(*) n FROM announcements WHERE event_id=1').get().n,1);}finally{db.close();}
  }finally{if(dirname(folder)===resolve(tmpdir()))await rm(folder,{recursive:true,force:true});}
 });

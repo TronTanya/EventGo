@@ -1,0 +1,36 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: eventgo
+      POSTGRES_PASSWORD: eventgo
+      POSTGRES_DB: eventgo
+    volumes:
+      - eventgo_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eventgo -d eventgo"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+  web:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgres://eventgo:eventgo@db:5432/eventgo
+      HOST: 0.0.0.0
+      PORT: "3000"
+      EVENTGO_NO_BROWSER: "1"
+      EVENTGO_DATA_DIR: /data
+    volumes:
+      - eventgo_uploads:/data
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  eventgo_pg:
+  eventgo_uploads:

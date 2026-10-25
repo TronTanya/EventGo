@@ -6,6 +6,45 @@ import { join } from 'node:path';
 export function hashPassword(password, salt = randomBytes(16).toString('hex')) {
   return `${salt}:${scryptSync(password, salt, 64).toString('hex')}`;
 }
+
+/** Async DB for the HTTP server: SQLite locally, PostgreSQL when DATABASE_URL is set. */
+export async function connectDatabase(directory) {
+  if (process.env.DATABASE_URL) {
+    const { openPostgresDatabase } = await import('./pg-adapter.mjs');
+    return openPostgresDatabase(process.env.DATABASE_URL, directory);
+  }
+  return wrapSqlite(openDatabase(directory));
+}
+
+function wrapSqlite(raw) {
+  return {
+    dialect: 'sqlite',
+    get: (sql, ...params) => Promise.resolve(raw.prepare(sql).get(...params)),
+    all: (sql, ...params) => Promise.resolve(raw.prepare(sql).all(...params)),
+    run: (sql, ...params) => Promise.resolve(raw.prepare(sql).run(...params)),
+    exec: (sql) => Promise.resolve(raw.exec(sql)),
+    async transaction(fn) {
+      raw.exec('BEGIN IMMEDIATE');
+      try {
+        const result = await fn();
+        raw.exec('COMMIT');
+        return result;
+      } catch (error) {
+        try { raw.exec('ROLLBACK'); } catch {}
+        throw error;
+      }
+    },
+    async backup(dest) {
+      const { backup } = await import('node:sqlite');
+      await backup(raw, dest);
+    },
+    async close() {
+      raw.close();
+    },
+    raw
+  };
+}
+
 export function openDatabase(directory) {
   mkdirSync(join(directory, 'uploads'), { recursive: true });
   const db = new DatabaseSync(join(directory, 'eventgo.sqlite'));
@@ -50,7 +89,12 @@ export function openDatabase(directory) {
     CREATE INDEX IF NOT EXISTS announcement_event ON announcements(event_id, id);
     CREATE TABLE IF NOT EXISTS outbox(id INTEGER PRIMARY KEY, event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE, guest_id INTEGER REFERENCES guests(id) ON DELETE SET NULL, email TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL CHECK(kind IN ('ticket','announcement','survey')), subject TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
     CREATE INDEX IF NOT EXISTS outbox_event ON outbox(event_id, id);
-    PRAGMA user_version=12;`);
+    PRAGMA user_version=13;`);
+  if (!db.prepare('PRAGMA table_info(expenses)').all().some(c => c.name === 'contractor_id')) {
+    db.exec('ALTER TABLE expenses ADD COLUMN contractor_id INTEGER REFERENCES team(id) ON DELETE SET NULL');
+    linkContractorExpenses(db);
+  }
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS expense_contractor ON expenses(contractor_id) WHERE contractor_id IS NOT NULL');
   const eventColumns = db.prepare('PRAGMA table_info(events)').all().map(c => c.name);
   if (!eventColumns.includes('expected_guests')) {
     db.exec('ALTER TABLE events ADD COLUMN expected_guests INTEGER NOT NULL DEFAULT 0 CHECK(expected_guests>=0)');
@@ -69,6 +113,17 @@ export function openDatabase(directory) {
 function seedExpectedGuests(db) {
   const set = db.prepare('UPDATE events SET expected_guests=? WHERE title=? AND expected_guests=0 AND capacity>=?');
   [['IT-Форум 2026', 160], ['Дизайн-завтрак', 30], ['Хакатон EventTech', 60]].forEach(([title, n]) => set.run(n, title, n));
+}
+function linkContractorExpenses(db) {
+  const free = db.prepare('SELECT * FROM expenses WHERE event_id=? AND contractor_id IS NULL ORDER BY id');
+  const link = db.prepare('UPDATE expenses SET contractor_id=? WHERE id=?');
+  for (const c of db.prepare("SELECT * FROM team WHERE kind='contractor' AND cost>0 ORDER BY id").all()) {
+    const list = free.all(c.event_id), name = c.name.toLowerCase();
+    const byName = list.find(x => x.name.toLowerCase().includes(name));
+    const byCost = list.filter(x => x.planned === c.cost);
+    const match = byName || (byCost.length === 1 ? byCost[0] : null);
+    if (match) link.run(c.id, match.id);
+  }
 }
 function seedEndDates(db) {
   db.prepare("UPDATE events SET ends_at='2026-10-25T18:00' WHERE title='Хакатон EventTech' AND starts_at='2026-10-23T09:00' AND ends_at=''").run();
@@ -238,6 +293,7 @@ function seed(db, directory) {
     seedAnnouncements(db);
     seedExpectedGuests(db);
     seedEndDates(db);
+    linkContractorExpenses(db);
     db.exec('COMMIT');
   } catch(error) { db.exec('ROLLBACK'); throw error; }
 }
