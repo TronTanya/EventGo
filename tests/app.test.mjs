@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { get as httpGet, request as httpRequest } from 'node:http';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -280,6 +281,10 @@ test('EventGo: persistent data, roles, registration, files and exports',async t=
    assert.ok((await request('/events/'+id,{cookie:org})).body.team.some(p=>p.user_id===partnerId));
    assert.ok((await request('/events/'+id,{cookie:org})).body.team.some(p=>p.email==='organizer@eventgo.local'));
    assert.equal((await request('/events/'+id,{method:'PATCH',cookie:org,data:{title:'Попытка создателя'}})).status,403);
+   assert.equal((await request('/events/'+id,{method:'DELETE',cookie:org})).status,403);
+   assert.equal((await request('/events/'+id+'/tasks',{method:'POST',cookie:org,data:{title:'Задача соорганизатора',due_date:'2026-12-01'}})).status,201);
+   assert.equal((await request('/events/'+id+'/expenses',{method:'POST',cookie:org,data:{name:'Кофе',category:'Кейтеринг',planned:500,actual:0}})).status,201);
+   assert.equal((await request('/events/'+id+'/guests',{method:'POST',cookie:org,data:{name:'Гость соорганизатора',email:'coorg@example.com'}})).status,201);
    assert.equal((await request('/events/'+id,{method:'PATCH',cookie:partner,data:{title:'Ведёт Елена',owner_id:2}})).status,400);
    assert.equal((await request('/events/'+id,{method:'PATCH',cookie:partner,data:{title:'Ведёт Елена',owner_id:(await request('/me',{cookie:org})).body.user.id}})).status,200);
    const back=(await request('/events/'+id,{cookie:org})).body.event;assert.equal(back.owner_id,(await request('/me',{cookie:org})).body.user.id);assert.equal(back.title,'Ведёт Елена');
@@ -407,6 +412,22 @@ test('EventGo: persistent data, roles, registration, files and exports',async t=
    assert.ok(Array.isArray(g.body.program));assert.equal(g.body.program[0]?.title,'Нетворкинг');assert.equal(Object.hasOwn(g.body,'event_id'),false);
    assert.equal((await fetch(base+'/ticket/'+ticket)).status,200);
  });
+ await t.test('guest cancels own registration and can register again',async()=>{
+   const id=(await request('/events',{method:'POST',cookie:org,data:{title:'Отмена гостем',type:'Встреча',starts_at:'2026-12-20T10:00',location:'Зал',capacity:1,budget:0}})).body.id;
+   const pub=(await request('/events/'+id,{cookie:org})).body.event.public_token;
+   const guest={name:'Отменяющий гость',email:'leave@example.com',consent:true};
+   const first=(await request('/public/'+pub,{method:'POST',data:guest})).body.ticket;
+   assert.equal((await request('/ticket/'+first)).body.can_cancel,true);
+   assert.equal((await request('/public/'+pub,{method:'POST',data:{...guest,email:'other@example.com'}})).status,409);
+   const cancelled=await request('/ticket/'+first+'/cancel',{method:'POST'});assert.equal(cancelled.status,200);assert.equal(cancelled.body.status,'cancelled');
+   const after=(await request('/ticket/'+first)).body;assert.equal(after.status,'cancelled');assert.equal(after.can_cancel,false);
+   assert.equal((await request('/events/'+id,{cookie:org})).body.event.guests.registered,0);
+   const again=await request('/public/'+pub,{method:'POST',data:guest});assert.equal(again.status,201);assert.notEqual(again.body.ticket,first);
+   assert.equal((await request('/events/'+id+'/checkin',{method:'POST',cookie:org,data:{ticket:again.body.ticket}})).status,200);
+   assert.equal((await request('/ticket/'+again.body.ticket+'/cancel',{method:'POST'})).status,409);
+   assert.equal((await request('/ticket/'+'0'.repeat(32)+'/cancel',{method:'POST'})).status,404);
+   assert.equal((await request('/events/'+id,{method:'DELETE',cookie:org})).status,200);
+ });
  await t.test('check-in rejects wrong event, repeat and cancelled tickets',async()=>{
    assert.equal((await request('/events/1/checkin',{method:'POST',cookie:org,data:{ticket}})).status,404);
    assert.equal((await request(`/events/${eventId}/checkin`,{method:'POST',cookie:member,data:{ticket}})).status,403);
@@ -435,7 +456,7 @@ test('EventGo: persistent data, roles, registration, files and exports',async t=
  await t.test('server rejects a file larger than 4 GiB before receiving its body',async()=>{
    const status=await new Promise((resolve,reject)=>{
      const req=httpRequest(base+`/api/events/${eventId}/files?name=too-large.mp4`,{method:'POST',headers:{Cookie:org,'X-EventGo':'1','Content-Length':String(MAX_FILE_BYTES+1)}},res=>{res.resume();resolve(res.statusCode);});req.on('error',reject);req.end();
-   });assert.equal(status,413);assert.equal((await request('/health')).body.maxFileBytes,MAX_FILE_BYTES);
+   });assert.equal(status,413);const health=(await request('/health')).body;assert.equal(health.maxFileBytes,MAX_FILE_BYTES);assert.equal(health.version,JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8')).version);
  });
  await t.test('exactly 4 GiB can be uploaded and downloaded without buffering the file',{skip:process.env.EVENTGO_TEST_LARGE_UPLOAD!=='1',timeout:600000},async()=>{
    const block=Buffer.alloc(1024*1024,0x5a),expected=createHash('sha256');
