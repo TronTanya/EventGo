@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: eventgo
+    runtime: node
+    plan: free
+    branch: main
+    buildCommand: "true"
+    startCommand: node server.mjs
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: HOST
+        value: 0.0.0.0
+      - key: EVENTGO_NO_BROWSER
+        value: "1"

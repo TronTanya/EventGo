@@ -38,11 +38,97 @@ export function openDatabase(directory) {
     CREATE INDEX IF NOT EXISTS survey_event ON surveys(event_id);
     CREATE INDEX IF NOT EXISTS survey_question ON survey_questions(survey_id, sort_order, id);
     CREATE INDEX IF NOT EXISTS survey_response ON survey_responses(survey_id, id);
-    PRAGMA user_version=6;`);
+    CREATE TABLE IF NOT EXISTS registration_fields(id INTEGER PRIMARY KEY, event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE, label TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('text','choice','checkbox')), options TEXT NOT NULL DEFAULT '', required INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE IF NOT EXISTS guest_answers(guest_id INTEGER NOT NULL REFERENCES guests(id) ON DELETE CASCADE, field_id INTEGER NOT NULL REFERENCES registration_fields(id) ON DELETE CASCADE, value TEXT NOT NULL, PRIMARY KEY(guest_id, field_id));
+    CREATE INDEX IF NOT EXISTS registration_field_event ON registration_fields(event_id, sort_order, id);
+    CREATE INDEX IF NOT EXISTS guest_answer_field ON guest_answers(field_id);
+    CREATE TABLE IF NOT EXISTS invites(id INTEGER PRIMARY KEY, event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE, team_id INTEGER NOT NULL REFERENCES team(id) ON DELETE CASCADE, token_hash TEXT NOT NULL UNIQUE, created_by INTEGER NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL, accepted_at TEXT, accepted_user_id INTEGER REFERENCES users(id), created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+    CREATE INDEX IF NOT EXISTS invite_team ON invites(team_id);
+    CREATE TABLE IF NOT EXISTS catalog_items(id INTEGER PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('venue','contractor')), name TEXT NOT NULL, city TEXT NOT NULL, category TEXT NOT NULL, capacity INTEGER NOT NULL DEFAULT 0 CHECK(capacity>=0), price REAL NOT NULL DEFAULT 0 CHECK(price>=0), price_unit TEXT NOT NULL DEFAULT 'event' CHECK(price_unit IN ('event','guest')), address TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', email TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '', created_by INTEGER REFERENCES users(id) ON DELETE SET NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+    CREATE INDEX IF NOT EXISTS catalog_kind_city ON catalog_items(kind, city);
+    CREATE TABLE IF NOT EXISTS announcements(id INTEGER PRIMARY KEY, event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE, text TEXT NOT NULL, important INTEGER NOT NULL DEFAULT 0, author TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+    CREATE INDEX IF NOT EXISTS announcement_event ON announcements(event_id, id);
+    CREATE TABLE IF NOT EXISTS outbox(id INTEGER PRIMARY KEY, event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE, guest_id INTEGER REFERENCES guests(id) ON DELETE SET NULL, email TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL CHECK(kind IN ('ticket','announcement','survey')), subject TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+    CREATE INDEX IF NOT EXISTS outbox_event ON outbox(event_id, id);
+    PRAGMA user_version=12;`);
+  const eventColumns = db.prepare('PRAGMA table_info(events)').all().map(c => c.name);
+  if (!eventColumns.includes('expected_guests')) {
+    db.exec('ALTER TABLE events ADD COLUMN expected_guests INTEGER NOT NULL DEFAULT 0 CHECK(expected_guests>=0)');
+    seedExpectedGuests(db);
+  }
+  if (!eventColumns.includes('ends_at')) {
+    db.exec("ALTER TABLE events ADD COLUMN ends_at TEXT NOT NULL DEFAULT ''");
+    seedEndDates(db);
+  }
   db.prepare("INSERT OR IGNORE INTO app_settings(key,value) VALUES('installation_id',?)").run(randomUUID());
   if (!db.prepare('SELECT id FROM users LIMIT 1').get()) seed(db, directory);
-  else {seedProgramIfNeeded(db);seedSurveyIfNeeded(db);}
+  else {seedProgramIfNeeded(db);seedSurveyIfNeeded(db);seedFormIfNeeded(db);seedPartnerIfNeeded(db);seedCatalogIfNeeded(db);seedAnnouncementsIfNeeded(db);}
   return db;
+}
+
+function seedExpectedGuests(db) {
+  const set = db.prepare('UPDATE events SET expected_guests=? WHERE title=? AND expected_guests=0 AND capacity>=?');
+  [['IT-Форум 2026', 160], ['Дизайн-завтрак', 30], ['Хакатон EventTech', 60]].forEach(([title, n]) => set.run(n, title, n));
+}
+function seedEndDates(db) {
+  db.prepare("UPDATE events SET ends_at='2026-10-25T18:00' WHERE title='Хакатон EventTech' AND starts_at='2026-10-23T09:00' AND ends_at=''").run();
+}
+function seedAnnouncementsIfNeeded(db) {
+  if (db.prepare('SELECT id FROM announcements LIMIT 1').get()) return;
+  seedAnnouncements(db);
+}
+function seedAnnouncements(db) {
+  if (!db.prepare("SELECT id FROM events WHERE id=1 AND title='IT-Форум 2026'").get()) return;
+  db.prepare('INSERT INTO announcements(event_id,text,important,author) VALUES(1,?,0,?)')
+    .run('Регистрация гостей открывается в 9:30 в холле. Возьмите с собой билет с QR-кодом — на телефоне или распечатанный.', 'Александр Войтенко');
+}
+
+function seedCatalogIfNeeded(db) {
+  if (db.prepare('SELECT id FROM catalog_items LIMIT 1').get()) return;
+  seedCatalog(db);
+}
+function seedCatalog(db) {
+  const item = db.prepare('INSERT INTO catalog_items(kind,name,city,category,capacity,price,price_unit,address,description,email,phone) VALUES(?,?,?,?,?,?,?,?,?,?,?)');
+  [
+    ['venue','Квартал труда','Якутск','Конференц-зал',250,100000,'event','ул. Ленина, 1 (демо)','Трансформируемый зал, проектор, звук, зона кофе-брейка.','hall@kvartal.example','+7 914 000-10-01'],
+    ['venue','IT-парк','Якутск','Конгресс-зал',400,150000,'event','ул. Кирова, 18 (демо)','Большой зал и три переговорные, трансляция, парковка.','events@itpark.example','+7 914 000-10-02'],
+    ['venue','Креативное пространство «Север»','Якутск','Лофт',60,25000,'event','ул. Октябрьская, 5 (демо)','Камерное пространство для встреч и мастер-классов.','hello@sever.example','+7 914 000-10-03'],
+    ['venue','Конгресс-холл «Полярная звезда»','Якутск','Конгресс-холл',800,320000,'event','пр. Ленина, 24 (демо)','Амфитеатр, синхронный перевод, гардероб на 800 мест.','congress@star.example','+7 914 000-10-04'],
+    ['venue','Лофт «Мерзлота»','Якутск','Лофт',120,45000,'event','ул. Чернышевского, 9 (демо)','Кирпичный лофт с барной стойкой, подходит для нетворкинга.','loft@merzlota.example','+7 914 000-10-05'],
+    ['venue','Дворец культуры «Горняк»','Нерюнгри','Дом культуры',300,60000,'event','пр. Дружбы народов, 7 (демо)','Сцена, звук, свет, фойе для регистрации.','dk@gornyak.example','+7 914 000-20-01'],
+    ['venue','Конференц-зал гостиницы «Алмаз»','Мирный','Конференц-зал',150,50000,'event','ул. Ленина, 3 (демо)','Зал при гостинице, проживание для спикеров со скидкой.','conf@almaz.example','+7 914 000-30-01'],
+    ['contractor','Северный кейтеринг','Якутск','Кейтеринг',300,1500,'guest','','Кофе-брейки, обеды и фуршеты. Вегетарианское меню по запросу.','catering@example.com','+7 914 000-40-01'],
+    ['contractor','Кофе-брейк «Бодрость»','Якутск','Кейтеринг',150,600,'guest','','Кофе, чай и выпечка. Выезд в день заказа.','coffee@bodrost.example','+7 914 000-40-02'],
+    ['contractor','«Звук Севера»','Якутск','Оборудование',0,60000,'event','','Звук, свет, микрофоны, техник на весь день.','rent@zvuk.example','+7 914 000-40-03'],
+    ['contractor','Студия трансляций «Эфир»','Якутск','Оборудование',0,45000,'event','','Онлайн-трансляция на 2 камеры, запись выступлений.','live@efir.example','+7 914 000-40-04'],
+    ['contractor','Типография «Оттиск»','Якутск','Полиграфия',0,250,'guest','','Бейджи, программки, навигация. Срок — 3 рабочих дня.','print@ottisk.example','+7 914 000-40-05'],
+    ['contractor','Фотограф Ирина Степанова','Якутск','Фото и видео',0,20000,'event','','Репортажная съёмка, 150+ обработанных фото за 3 дня.','photo@stepanova.example','+7 914 000-40-06'],
+    ['contractor','Агентство ведущих «Микрофон»','Якутск','Ведущие',0,30000,'event','','Ведущий форума или хакатона, сценарий открытия и закрытия.','host@mic.example','+7 914 000-40-07'],
+    ['contractor','«Нерюнгри-Фуд»','Нерюнгри','Кейтеринг',200,900,'guest','','Кофе-брейки и обеды для мероприятий в Южной Якутии.','food@nerungri.example','+7 914 000-50-01'],
+    ['contractor','Трансфер «Сахатранс»','Якутск','Транспорт',0,18000,'event','','Автобус на 45 мест, встреча гостей в аэропорту.','bus@sakhatrans.example','+7 914 000-40-08']
+  ].forEach(row => item.run(...row));
+}
+
+function seedPartnerIfNeeded(db) {
+  if (db.prepare("SELECT id FROM users WHERE email='partner@eventgo.local'").get()) return;
+  db.prepare('INSERT INTO users(name,email,password_hash,role) VALUES(?,?,?,?)')
+    .run('Елена Соколова', 'partner@eventgo.local', hashPassword('PartnerGo2026!'), 'organizer');
+}
+
+function seedFormIfNeeded(db) {
+  if (db.prepare('SELECT id FROM registration_fields LIMIT 1').get()) return;
+  seedForm(db);
+}
+function seedForm(db) {
+  if (!db.prepare("SELECT id FROM events WHERE id=1 AND title='IT-Форум 2026'").get()) return;
+  const field = db.prepare('INSERT INTO registration_fields(event_id,label,kind,options,required,sort_order) VALUES(1,?,?,?,?,?)');
+  const section = Number(field.run('Какая секция вам интереснее?', 'choice', 'Технологии для города\nМастер-класс по продуктовому дизайну\nПанельная дискуссия', 1, 10).lastInsertRowid);
+  const food = Number(field.run('Питание', 'choice', 'Обычное\nВегетарианское\nБез глютена', 0, 20).lastInsertRowid);
+  field.run('Нужен ли раздаточный материал на английском', 'checkbox', '', 0, 30);
+  const guests = db.prepare('SELECT id FROM guests WHERE event_id=1 ORDER BY id').all();
+  const answer = db.prepare('INSERT OR IGNORE INTO guest_answers(guest_id,field_id,value) VALUES(?,?,?)');
+  const sections = ['Технологии для города', 'Мастер-класс по продуктовому дизайну', 'Панельная дискуссия'], foods = ['Обычное', 'Обычное', 'Вегетарианское', 'Обычное', 'Без глютена'];
+  guests.forEach((g, i) => { answer.run(g.id, section, sections[i % 3]); answer.run(g.id, food, foods[i % 5]); });
 }
 
 function seedProgramIfNeeded(db) {
@@ -97,6 +183,7 @@ function seed(db, directory) {
     const user = db.prepare('INSERT INTO users(name,email,password_hash,role) VALUES(?,?,?,?)');
     user.run('Александр Войтенко', 'organizer@eventgo.local', hashPassword('EventGo2026!'), 'organizer');
     user.run('Диана Мирзоян', 'team@eventgo.local', hashPassword('TeamGo2026!'), 'member');
+    user.run('Елена Соколова', 'partner@eventgo.local', hashPassword('PartnerGo2026!'), 'organizer');
     const event = db.prepare('INSERT INTO events(title,type,starts_at,location,description,goal,capacity,budget,owner_id,status,public_token) VALUES(?,?,?,?,?,?,?,?,1,?,?)');
     event.run('IT-Форум 2026', 'Форум', '2026-11-18T10:00', 'Якутск, Квартал труда', 'Технологии, люди и идеи, которые меняют город. День полезных знакомств, дискуссий и практических мастер-классов для IT-сообщества Якутска.', 'Объединить IT-сообщество и запустить новые совместные проекты.', 200, 350000, 'planning', randomBytes(16).toString('hex'));
     event.run('Дизайн-завтрак', 'Встреча', '2026-11-07T11:00', 'Якутск, креативное пространство', 'Неформальная встреча дизайнеров: обмен опытом, разбор портфолио и новые знакомства.', 'Познакомить локальных дизайнеров.', 40, 45000, 'planning', randomBytes(16).toString('hex'));
@@ -146,6 +233,11 @@ function seed(db, directory) {
     db.prepare('INSERT INTO program_items(event_id,starts_at,ends_at,title,speaker,hall,description,sort_order) VALUES(?,?,?,?,?,?,?,?)')
       .run(3, '2026-10-25T14:00', '2026-10-25T16:00', 'Защита проектов', 'Жюри хакатона', 'Актовый зал', 'Презентации команд и вопросы жюри.', 10);
     seedSurveys(db);
+    seedForm(db);
+    seedCatalog(db);
+    seedAnnouncements(db);
+    seedExpectedGuests(db);
+    seedEndDates(db);
     db.exec('COMMIT');
   } catch(error) { db.exec('ROLLBACK'); throw error; }
 }
