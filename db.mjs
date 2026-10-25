@@ -30,10 +30,18 @@ export function openDatabase(directory) {
     CREATE INDEX IF NOT EXISTS guest_event ON guests(event_id);
     CREATE INDEX IF NOT EXISTS activity_event ON activities(event_id);
     CREATE INDEX IF NOT EXISTS program_event ON program_items(event_id, starts_at, id);
-    PRAGMA user_version=4;`);
+    CREATE TABLE IF NOT EXISTS notification_state(user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, seen_guest_id INTEGER NOT NULL DEFAULT 0, seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+    CREATE TABLE IF NOT EXISTS surveys(id INTEGER PRIMARY KEY, event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','open','closed')), public_token TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+    CREATE TABLE IF NOT EXISTS survey_questions(id INTEGER PRIMARY KEY, survey_id INTEGER NOT NULL REFERENCES surveys(id) ON DELETE CASCADE, text TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('rating','text','choice')), options TEXT NOT NULL DEFAULT '', required INTEGER NOT NULL DEFAULT 1, sort_order INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE IF NOT EXISTS survey_responses(id INTEGER PRIMARY KEY, survey_id INTEGER NOT NULL REFERENCES surveys(id) ON DELETE CASCADE, guest_id INTEGER REFERENCES guests(id) ON DELETE SET NULL, guest_name TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(survey_id, guest_id));
+    CREATE TABLE IF NOT EXISTS survey_answers(id INTEGER PRIMARY KEY, response_id INTEGER NOT NULL REFERENCES survey_responses(id) ON DELETE CASCADE, question_id INTEGER NOT NULL REFERENCES survey_questions(id) ON DELETE CASCADE, value TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS survey_event ON surveys(event_id);
+    CREATE INDEX IF NOT EXISTS survey_question ON survey_questions(survey_id, sort_order, id);
+    CREATE INDEX IF NOT EXISTS survey_response ON survey_responses(survey_id, id);
+    PRAGMA user_version=6;`);
   db.prepare("INSERT OR IGNORE INTO app_settings(key,value) VALUES('installation_id',?)").run(randomUUID());
   if (!db.prepare('SELECT id FROM users LIMIT 1').get()) seed(db, directory);
-  else seedProgramIfNeeded(db);
+  else {seedProgramIfNeeded(db);seedSurveyIfNeeded(db);}
   return db;
 }
 
@@ -41,6 +49,33 @@ function seedProgramIfNeeded(db) {
   if (db.prepare('SELECT id FROM program_items LIMIT 1').get()) return;
   if (!db.prepare("SELECT id FROM events WHERE id=1 AND title='IT-Форум 2026'").get()) return;
   insertProgram(db, 1);
+}
+function seedSurveyIfNeeded(db) {
+  if (db.prepare('SELECT id FROM surveys LIMIT 1').get()) return;
+  seedSurveys(db);
+}
+function seedSurveys(db) {
+  const survey = db.prepare('INSERT INTO surveys(event_id,title,description,status,public_token) VALUES(?,?,?,?,?)');
+  const q = db.prepare('INSERT INTO survey_questions(survey_id,text,kind,options,required,sort_order) VALUES(?,?,?,?,?,?)');
+  if (db.prepare("SELECT id FROM events WHERE id=1 AND title='IT-Форум 2026'").get()) {
+    const id = Number(survey.run(1, 'Обратная связь после IT-Форума', 'Короткий опрос для гостей. Помогите сделать следующее событие лучше.', 'draft', randomBytes(16).toString('hex')).lastInsertRowid);
+    q.run(id, 'Насколько вам понравилось мероприятие?', 'rating', '', 1, 10);
+    q.run(id, 'Какая секция была самой полезной?', 'choice', 'Открытие\nТехнологии для города\nМастер-класс\nПанельная дискуссия\nНетворкинг', 1, 20);
+    q.run(id, 'Что улучшить в следующий раз?', 'text', '', 0, 30);
+  }
+  if (db.prepare("SELECT id FROM events WHERE id=3 AND title='Хакатон EventTech'").get()) {
+    const id = Number(survey.run(3, 'Как прошёл хакатон?', 'Оцените организацию и поделитесь впечатлениями.', 'open', randomBytes(16).toString('hex')).lastInsertRowid);
+    const rating = Number(q.run(id, 'Оцените организацию хакатона', 'rating', '', 1, 10).lastInsertRowid);
+    const choice = Number(q.run(id, 'Что было самым полезным?', 'choice', 'Менторы\nКейсы\nНетворкинг\nПитание и площадка', 1, 20).lastInsertRowid);
+    const text = Number(q.run(id, 'Что улучшить?', 'text', '', 0, 30).lastInsertRowid);
+    const response = db.prepare('INSERT INTO survey_responses(survey_id,guest_name) VALUES(?,?)');
+    const answer = db.prepare('INSERT INTO survey_answers(response_id,question_id,value) VALUES(?,?,?)');
+    [['Анна Иванова', '5', 'Менторы', 'Больше времени на защиту'], ['Михаил Петров', '4', 'Кейсы', ''], ['Елена Соколова', '5', 'Нетворкинг', 'Отличная атмосфера'], ['Дмитрий Андреев', '4', 'Менторы', 'Нужно больше розеток'], ['Софья Николаева', '3', 'Питание и площадка', 'Кофе закончился к вечеру']]
+      .forEach(([name, r, c, t]) => {
+        const rid = Number(response.run(id, name).lastInsertRowid);
+        answer.run(rid, rating, r); answer.run(rid, choice, c); if (t) answer.run(rid, text, t);
+      });
+  }
 }
 
 function insertProgram(db, eventId) {
@@ -110,6 +145,7 @@ function seed(db, directory) {
     insertProgram(db, 1);
     db.prepare('INSERT INTO program_items(event_id,starts_at,ends_at,title,speaker,hall,description,sort_order) VALUES(?,?,?,?,?,?,?,?)')
       .run(3, '2026-10-25T14:00', '2026-10-25T16:00', 'Защита проектов', 'Жюри хакатона', 'Актовый зал', 'Презентации команд и вопросы жюри.', 10);
+    seedSurveys(db);
     db.exec('COMMIT');
   } catch(error) { db.exec('ROLLBACK'); throw error; }
 }

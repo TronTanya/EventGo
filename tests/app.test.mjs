@@ -133,6 +133,64 @@ test('EventGo: persistent data, roles, registration, files and exports',async t=
    assert.equal((await request('/public/'+token)).body.program.length,0);
    const again=await request(`/events/${eventId}/program`,{method:'POST',cookie:org,data:{title:'Нетворкинг',starts_at:'2026-11-20T12:00',hall:'Холл'}});assert.equal(again.status,201);
  });
+ await t.test('notifications show overdue tasks, new registrations and respect roles',async()=>{
+   assert.equal((await request('/notifications')).status,401);
+   const orgList=(await request('/notifications',{cookie:org})).body;
+   assert.ok(orgList.items.some(n=>n.kind==='task'&&n.level==='danger'&&n.event_id===1));
+   assert.ok(orgList.items.some(n=>n.kind==='guests'&&n.event_id===1&&n.unread));
+   const memberList=(await request('/notifications',{cookie:member})).body;
+   assert.ok(memberList.items.every(n=>n.kind==='task'));
+   const memberTasks=(await request('/events/1',{cookie:member})).body.tasks.filter(t=>t.assignee_user_id===2).map(t=>t.id);
+   assert.ok(memberList.items.every(n=>memberTasks.includes(n.task_id)));
+   const seen=(await request('/notifications/seen',{method:'POST',cookie:org})).body;assert.equal(seen.items.some(n=>n.kind==='guests'),false);
+   const pub=(await request('/events/1',{cookie:org})).body.event.public_token;
+   assert.equal((await request('/public/'+pub,{method:'POST',data:{name:'Новый гость',email:'notify@example.com',consent:true}})).status,201);
+   const fresh=(await request('/notifications',{cookie:org})).body.items.find(n=>n.kind==='guests'&&n.event_id===1);assert.equal(fresh?.text,'Новых регистраций: 1');
+ });
+ await t.test('post-event surveys: create, answer, analytics and ticket link',async()=>{
+   const created=await request('/events',{method:'POST',cookie:org,data:{title:'Опросное событие',type:'Встреча',starts_at:'2026-12-20T10:00',location:'Зал',capacity:20,budget:0}});assert.equal(created.status,201);const id=created.body.id;
+   assert.equal((await request(`/events/${id}/survey`,{cookie:member})).status,403);
+   assert.equal((await request(`/events/${id}/survey`,{cookie:org})).body.survey,null);
+   const saved=await request(`/events/${id}/survey`,{method:'PUT',cookie:org,data:{title:'Как прошла встреча?',description:'Коротко',status:'draft',questions:[{text:'Оценка',kind:'rating',required:true},{text:'Что понравилось?',kind:'choice',options:['Программа','Команда'],required:true},{text:'Комментарий',kind:'text',required:false}]}});
+   assert.equal(saved.status,200);assert.equal(saved.body.survey.status,'draft');assert.equal(saved.body.questions.length,3);assert.equal(saved.body.responses,0);
+   const token=saved.body.survey.public_token;assert.match(token,/^[a-f0-9]{32}$/);
+   assert.equal((await request('/survey/'+token)).status,404);
+   const guest=await request(`/events/${id}/guests`,{method:'POST',cookie:org,data:{name:'Гость опроса',email:'survey-guest@example.com'}});assert.equal(guest.status,201);
+   assert.equal((await request('/ticket/'+guest.body.ticket)).body.survey_token,null);
+   await request(`/events/${id}/survey`,{method:'PUT',cookie:org,data:{title:'Как прошла встреча?',description:'Коротко',status:'open',questions:saved.body.questions.map(q=>({id:q.id,text:q.text,kind:q.kind,options:q.options,required:q.required}))}});
+   assert.equal((await request('/ticket/'+guest.body.ticket)).body.survey_token,token);
+   const publicSurvey=await request('/survey/'+token);assert.equal(publicSurvey.status,200);assert.equal(publicSurvey.body.questions.length,3);
+   assert.equal((await request('/survey/'+token,{method:'POST',data:{answers:{}}})).status,400);
+   const answers={[saved.body.questions[0].id]:'5',[saved.body.questions[1].id]:'Программа',[saved.body.questions[2].id]:'Всё понравилось'};
+   assert.equal((await request('/survey/'+token,{method:'POST',data:{answers,ticket:guest.body.ticket}})).status,201);
+   assert.equal((await request('/survey/'+token,{method:'POST',data:{answers,ticket:guest.body.ticket}})).status,409);
+   assert.equal((await request('/survey/'+token,{method:'POST',data:{answers:{[saved.body.questions[0].id]:'4',[saved.body.questions[1].id]:'Команда'}}})).status,201);
+   const results=(await request(`/events/${id}/survey`,{cookie:org})).body;assert.equal(results.responses,2);assert.equal(results.average,4.5);
+   assert.deepEqual(results.questions[0].counts,[0,0,0,1,1]);assert.deepEqual(results.questions[1].counts,[1,1]);
+   const detail=(await request('/events/'+id,{cookie:org})).body;assert.equal(detail.survey.responses,2);assert.equal(detail.survey.average,4.5);
+   const report=await request(`/events/${id}/report.json`,{cookie:org});assert.equal(report.status,200);assert.equal(report.body.survey.responses,2);
+   assert.equal((await fetch(base+'/survey/'+token)).status,200);
+   await request(`/events/${id}/survey`,{method:'PUT',cookie:org,data:{title:'Как прошла встреча?',status:'closed',questions:saved.body.questions.map(q=>({id:q.id,text:q.text,kind:q.kind,options:q.options,required:q.required}))}});
+   assert.equal((await request('/survey/'+token,{method:'POST',data:{answers:{[saved.body.questions[0].id]:'3',[saved.body.questions[1].id]:'Программа'}}})).status,409);
+   assert.equal((await request('/ticket/'+guest.body.ticket)).body.survey_token,null);
+   assert.equal((await request(`/events/${id}/survey`,{method:'DELETE',cookie:org})).status,200);
+   assert.equal((await request(`/events/${id}/survey`,{cookie:org})).body.survey,null);
+   assert.equal((await request('/events/'+id,{method:'DELETE',cookie:org})).status,200);
+ });
+ await t.test('organizer adds and imports guests with limits and duplicates',async()=>{
+   const created=await request('/events',{method:'POST',cookie:org,data:{title:'Импорт гостей',type:'Встреча',starts_at:'2026-12-10T10:00',location:'Зал',capacity:3,budget:0}});assert.equal(created.status,201);const id=created.body.id;
+   assert.equal((await request(`/events/${id}/guests`,{method:'POST',cookie:member,data:{name:'X',email:'x@example.com'}})).status,403);
+   assert.equal((await request(`/events/${id}/guests`,{method:'POST',cookie:org,data:{name:'Без почты',email:'bad'}})).status,400);
+   const added=await request(`/events/${id}/guests`,{method:'POST',cookie:org,data:{name:'Ручной гость',email:'Manual@Example.com',company:'СВФУ'}});assert.equal(added.status,201);assert.match(added.body.ticket,/^[a-f0-9]{32}$/);
+   assert.equal((await request(`/events/${id}/guests`,{method:'POST',cookie:org,data:{name:'Повтор',email:'manual@example.com'}})).status,409);
+   assert.equal((await request(`/events/${id}/guests/import`,{method:'POST',cookie:member,data:{rows:[{name:'A',email:'a@example.com'}]}})).status,403);
+   assert.equal((await request(`/events/${id}/guests/import`,{method:'POST',cookie:org,data:{rows:[]}})).status,400);
+   const imported=await request(`/events/${id}/guests/import`,{method:'POST',cookie:org,data:{status:'registered',rows:[{line:2,name:'Анна',email:'anna@example.com'},{line:3,name:'Повтор',email:'MANUAL@example.com'},{line:4,name:'',email:'empty@example.com'},{line:5,name:'Анна 2',email:'anna@example.com'},{line:6,name:'Борис',email:'boris@example.com',phone:'+7 900'},{line:7,name:'Лишний',email:'extra@example.com'}]}});
+   assert.equal(imported.status,200);assert.equal(imported.body.added,2);assert.deepEqual(imported.body.skipped.map(x=>x.line),[3,4,5,7]);
+   const guests=(await request('/events/'+id,{cookie:org})).body.guests;assert.equal(guests.length,3);assert.equal(guests.find(g=>g.email==='boris@example.com').status,'registered');assert.equal(guests.find(g=>g.email==='manual@example.com').status,'confirmed');
+   assert.equal((await request('/ticket/'+added.body.ticket)).status,200);
+   assert.equal((await request('/events/'+id,{method:'DELETE',cookie:org})).status,200);
+ });
  await t.test('guest afisha exposes only public event information',async()=>{
    let list=await request('/afisha');assert.equal(list.status,200);assert.ok(list.body.some(e=>e.public_token===token));
    for(const e of list.body){assert.ok(['planning','active'].includes(e.status));for(const field of ['budget','expense','expenses','owner_id','tasks','team','guests'])assert.equal(Object.hasOwn(e,field),false,field);}
@@ -224,6 +282,6 @@ test('chat migration preserves existing accounts, events and files',async()=>{
    let db=openDatabase(folder);db.exec("DROP TABLE chat_messages; PRAGMA user_version=1; UPDATE events SET title='Существующее мероприятие' WHERE id=1");
    const before={events:db.prepare('SELECT count(*) n FROM events').get().n,users:db.prepare('SELECT count(*) n FROM users').get().n,files:db.prepare('SELECT count(*) n FROM files').get().n};db.close();
    db=openDatabase(folder);
-   try{assert.equal(db.prepare('PRAGMA user_version').get().user_version,4);assert.equal(db.prepare('SELECT title FROM events WHERE id=1').get().title,'Существующее мероприятие');for(const table of ['events','users','files'])assert.equal(db.prepare(`SELECT count(*) n FROM ${table}`).get().n,before[table]);assert.equal(db.prepare('SELECT count(*) n FROM chat_messages').get().n,0);assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='program_items'").get());}finally{db.close();}
+   try{assert.equal(db.prepare('PRAGMA user_version').get().user_version,6);assert.equal(db.prepare('SELECT title FROM events WHERE id=1').get().title,'Существующее мероприятие');for(const table of ['events','users','files'])assert.equal(db.prepare(`SELECT count(*) n FROM ${table}`).get().n,before[table]);assert.equal(db.prepare('SELECT count(*) n FROM chat_messages').get().n,0);assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='program_items'").get());assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='surveys'").get());}finally{db.close();}
  }finally{if(dirname(folder)===resolve(tmpdir()))await rm(folder,{recursive:true,force:true});}
 });

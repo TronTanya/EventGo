@@ -41,3 +41,22 @@
 .ticket-program{text-align:left;margin-top:24px}
 .panel.pad .program-timeline{padding:4px 2px}
 @media(max-width:760px){.program-item,.program-timeline.compact .program-item{grid-template-columns:1fr;gap:6px}.program-time{grid-auto-flow:column;justify-content:start;gap:8px;align-items:baseline}}
+
+.bell{position:relative}
+.bell-count{position:absolute;top:-6px;right:-6px;min-width:19px;height:19px;padding:0 5px;border-radius:10px;background:#e0335e;color:white;font-size:10px;font-weight:700;line-height:19px;text-align:center;border:2px solid white}
+.notice-list{display:flex;flex-direction:column;gap:8px}
+.notice-item{display:grid;grid-template-columns:10px minmax(0,1fr) 18px;align-items:center;gap:12px;width:100%;text-align:left;border:1px solid var(--line);background:white;border-radius:12px;padding:12px 14px;color:var(--ink)}
+.notice-item:hover{background:#f7f5ff;border-color:#d9cdfd}
+.notice-item strong{display:block;font-size:13px;font-weight:600;overflow-wrap:anywhere}
+.notice-item small{display:block;font-size:11px;color:var(--muted);margin-top:2px}
+.notice-item .icon{width:16px;height:16px;color:var(--muted)}
+.notice-dot{width:9px;height:9px;border-radius:50%;background:var(--purple)}
+.notice-item.danger .notice-dot{background:#e0335e}
+.notice-item.warning .notice-dot{background:var(--orange)}
+@media(max-width:760px){.top-date{display:none}.bell{width:34px;height:34px}}
+.survey-share{display:flex;justify-content:space-between;gap:18px;align-items:center;flex-wrap:wrap}.survey-share .badge{margin-bottom:8px}.survey-link{display:flex;gap:8px;align-items:center;flex:1;min-width:220px}.survey-link input{flex:1;min-width:0;padding:11px 12px;border:1px solid var(--line);border-radius:9px;font-size:12px;background:#faf8ff}
+.survey-result-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:8px}.survey-score{font-size:34px;font-weight:750;letter-spacing:-1px;color:var(--cta);line-height:1}
+.survey-quotes{list-style:none;padding:0;margin:14px 0 0;display:flex;flex-direction:column;gap:12px}.survey-quotes li{background:#faf8ff;border:1px solid var(--line);border-radius:12px;padding:12px 14px}.survey-quotes p{font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}.survey-quotes span{display:block;margin-top:6px;font-size:10px;color:var(--muted)}
+.survey-questions{display:flex;flex-direction:column;gap:14px;margin:18px 0}.survey-q{border:1px solid var(--line);border-radius:14px;padding:14px;background:#faf8ff}.survey-q-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.survey-required{align-items:center;margin-top:28px}.survey-q[data-kind="rating"] .q-options,.survey-q[data-kind="text"] .q-options{display:none}
+.survey-public{max-width:640px;margin:0 auto}.survey-public h1{margin:8px 0 12px}.survey-public>p.muted{margin-bottom:26px}.survey-field textarea{width:100%;min-height:100px;padding:11px 12px;border:1px solid #e4dfed;border-radius:9px;font-size:13px;resize:vertical}.survey-public .button{width:100%}.survey-field{border:0;padding:0;margin:0 0 22px}.survey-field legend{font-weight:650;margin-bottom:12px;font-size:14px}.survey-field .req{color:#c52b52}.rating-scale{display:flex;gap:8px;flex-wrap:wrap}.rating-scale label{cursor:pointer}.rating-scale input{position:absolute;opacity:0;pointer-events:none}.rating-scale span{display:grid;place-items:center;width:48px;height:48px;border-radius:12px;border:1px solid var(--line);background:white;font-weight:700}.rating-scale input:checked+span,.rating-scale label:hover span{background:var(--purple);color:white;border-color:var(--purple)}.rating-hint{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:6px;max-width:280px}.choice-list{display:flex;flex-direction:column;gap:10px}.ticket-survey{margin-top:22px;padding:18px;border:1px solid #e5dcf7;background:#f7f3ff;border-radius:16px;text-align:left}.ticket-survey h2{font-size:16px;margin-bottom:6px}.ticket-survey .button{margin-top:12px;width:100%}
+@media(max-width:760px){.survey-share{align-items:stretch}.survey-link{flex-direction:column}.metric-grid{grid-template-columns:1fr 1fr}}
