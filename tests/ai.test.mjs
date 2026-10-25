@@ -31,7 +31,7 @@ test('AI assistant configuration, privacy, context and persistence',async()=>{
     await service.ask(1,member,{question:'Личный вопрос сотрудника',include_context:true});const memberRequest=calls.at(-1).body;
     assert.equal(memberRequest.instructions.includes('"budget"'),false);assert.equal(memberRequest.instructions.includes('350000'),false);assert.equal(memberRequest.instructions.includes('organizer@eventgo.local'),false);assert.equal(memberRequest.instructions.includes('guest1@example.com'),false);
     assert.ok(memberRequest.instructions.includes('"tasks"'));
-    await service.ask(1,organizer,{question:'Сравни план и факт',include_context:true});const orgRequest=calls.at(-1).body;assert.ok(orgRequest.instructions.includes('"budget"'));assert.ok(orgRequest.instructions.includes('350000'));assert.equal(JSON.stringify(orgRequest.input).includes('Личный вопрос сотрудника'),false);
+    await service.ask(1,organizer,{question:'Сравни план и факт',include_context:true});const orgRequest=calls.at(-1).body;assert.ok(orgRequest.instructions.includes('"budget"'));assert.ok(orgRequest.instructions.includes('350000'));assert.ok(orgRequest.instructions.includes('"today_yakutsk"'));assert.ok(orgRequest.instructions.includes('"overdue":true'));assert.equal(JSON.stringify(orgRequest.input).includes('Личный вопрос сотрудника'),false);
     assert.equal((await service.history(1,organizer)).turns.length,2);assert.equal((await service.history(1,member)).turns.length,1);
     await assert.rejects(service.ask(1,{id:999,role:'member'},{question:'Чужой запрос'}),e=>e.status===403);
     await assert.rejects(service.history(1,{id:999,role:'member'}),e=>e.status===403);

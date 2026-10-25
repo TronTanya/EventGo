@@ -73,8 +73,9 @@ class AIService{
     await this.db.run('DELETE FROM ai_turns WHERE event_id=? AND user_id=?',eventId,user.id);return {ok:true};
   }
   async context(event,user){
-    const tasks=await this.db.all('SELECT t.title,t.status,t.due_date,t.priority,m.role responsibility FROM tasks t LEFT JOIN team m ON m.id=t.assignee_id WHERE t.event_id=? ORDER BY t.due_date LIMIT 60',event.id);
-    const context={title:event.title,type:event.type,date:event.starts_at,location:event.location,description:event.description.slice(0,2500),goal:event.goal.slice(0,1000),capacity:event.capacity,status:event.status,tasks};
+    const today=new Date(Date.now()+9*3600000).toISOString().slice(0,10);
+    const tasks=(await this.db.all('SELECT t.title,t.status,t.due_date,t.priority,m.role responsibility FROM tasks t LEFT JOIN team m ON m.id=t.assignee_id WHERE t.event_id=? ORDER BY t.due_date LIMIT 60',event.id)).map(t=>({...t,overdue:t.status!=='done'&&t.due_date<today}));
+    const context={today_yakutsk:today,title:event.title,type:event.type,date:event.starts_at,location:event.location,description:event.description.slice(0,2500),goal:event.goal.slice(0,1000),capacity:event.capacity,status:event.status,tasks};
     if(user.role==='organizer'){
       context.budget={limit:event.budget,...await this.db.get('SELECT coalesce(sum(planned),0) planned,coalesce(sum(actual),0) actual FROM expenses WHERE event_id=?',event.id)};
     }
