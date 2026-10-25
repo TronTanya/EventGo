@@ -88,3 +88,5 @@
 html:has(.app-shell){scrollbar-gutter:stable}
 .event-card{display:flex;flex-direction:column;transition:border-color .2s ease-out,box-shadow .2s ease-out,transform .2s ease-out}.event-card-body{flex:1;display:flex;flex-direction:column}.event-card-body>p:last-of-type{margin-bottom:auto}
 .event-card:hover,.event-card:focus-within{border-color:#d9cdfd;box-shadow:0 12px 30px #2a165014}.event-card:hover{transform:translateY(-2px)}
+.search,.field input,.field select,.field textarea,.survey-link input,.survey-field textarea,.chat-composer textarea,.ai-composer>textarea,.event-switch,.status-select{transition:border-color .18s ease-out,box-shadow .18s ease-out}
+.search:focus-within,.field input:focus-visible,.field select:focus-visible,.field textarea:focus-visible,.survey-link input:focus-visible,.survey-field textarea:focus-visible,.chat-composer textarea:focus-visible,.ai-composer>textarea:focus-visible,.event-switch:focus-visible,.status-select:focus-visible{outline:2px solid transparent;outline-offset:0;border-color:var(--purple);box-shadow:0 0 0 3px #f0ebff}
