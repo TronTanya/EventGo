@@ -303,8 +303,17 @@ CREATE TABLE IF NOT EXISTS outbox(
   kind TEXT NOT NULL CHECK(kind IN ('ticket','announcement','survey')),
   subject TEXT NOT NULL,
   body TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  status TEXT NOT NULL DEFAULT 'demo' CHECK(status IN ('demo','pending','sent','failed')),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  error TEXT NOT NULL DEFAULT '',
+  sent_at TEXT
 );
+ALTER TABLE outbox ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'demo' CHECK(status IN ('demo','pending','sent','failed'));
+ALTER TABLE outbox ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE outbox ADD COLUMN IF NOT EXISTS error TEXT NOT NULL DEFAULT '';
+ALTER TABLE outbox ADD COLUMN IF NOT EXISTS sent_at TEXT;
+CREATE INDEX IF NOT EXISTS outbox_pending ON outbox(status, id);
 CREATE INDEX IF NOT EXISTS ai_turn_event_user ON ai_turns(event_id,user_id,id);
 CREATE INDEX IF NOT EXISTS chat_event_id ON chat_messages(event_id,id);
 CREATE INDEX IF NOT EXISTS task_event ON tasks(event_id);

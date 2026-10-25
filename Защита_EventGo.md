@@ -65,24 +65,23 @@ START.cmd / runtime/node.exe
         ▼
    server.mjs  ── HTTP API, сессии, права, check-in, backup
         │
-   ┌────┴────┐
-   ▼         ▼
- db.mjs    public/
- SQLite    SPA (app.js, style.css, qr.js, chat, AI)
-   │
-   ▼
- data/   eventgo.sqlite + uploads/
+   ┌────┴────────────┐
+   ▼                 ▼
+ db.mjs            public/
+   │               SPA (app.js, style.css, qr.js, chat, AI)
+   ├── DATABASE_URL задан → pg-adapter.mjs → PostgreSQL 16 (основная база)
+   └── не задан          → SQLite data/eventgo.sqlite (запасной режим)
+ data/uploads/  загруженные файлы
 ```
 
 | Решение | Почему |
 | --- | --- |
-| Node.js 24 + `node:sqlite` | Без npm-зависимостей и без PostgreSQL |
-| Один исполняемый runtime в папке | Запуск двойным щелчком на Windows |
+| Node.js 24, PostgreSQL 16 | Основная база для многопользовательской работы и развёртывания |
+| Docker Compose (`db` + `web`) | Сайт с базой поднимается одной командой |
+| Запасной SQLite (`node:sqlite`) | Запуск двойным щелчком без установки сервера БД |
+| Один исполняемый runtime в папке | Запуск на Windows без установки Node.js |
 | Роли на сервере | Участник команды не получает бюджет даже прямым API-запросом |
-| WAL SQLite | Устойчивость при одновременных запросах демо |
 | Автотесты `tests/` | Регрессии по ролям, гостям, файлам, опросам |
-
-В презентации могли фигурировать Django и PostgreSQL; переносимая версия сознательно упрощена, чтобы жюри и пользователи запускали продукт без настройки сервера БД.
 
 ---
 

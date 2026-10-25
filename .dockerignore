@@ -11,3 +11,5 @@ data
 НАЧНИТЕ ЗДЕСЬ.txt
 ОБНОВЛЕНИЕ.txt
 .pg-seed
+mail.env
+db.env

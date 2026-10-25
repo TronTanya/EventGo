@@ -7,7 +7,7 @@ export function hashPassword(password, salt = randomBytes(16).toString('hex')) {
   return `${salt}:${scryptSync(password, salt, 64).toString('hex')}`;
 }
 
-/** Async DB for the HTTP server: SQLite locally, PostgreSQL when DATABASE_URL is set. */
+/** Async DB: PostgreSQL when DATABASE_URL is set (preferred); otherwise local SQLite. */
 export async function connectDatabase(directory) {
   if (process.env.DATABASE_URL) {
     const { openPostgresDatabase } = await import('./pg-adapter.mjs');
@@ -104,6 +104,14 @@ export function openDatabase(directory) {
     db.exec("ALTER TABLE events ADD COLUMN ends_at TEXT NOT NULL DEFAULT ''");
     seedEndDates(db);
   }
+  const outboxColumns = db.prepare('PRAGMA table_info(outbox)').all().map(c => c.name);
+  if (!outboxColumns.includes('status')) {
+    db.exec(`ALTER TABLE outbox ADD COLUMN status TEXT NOT NULL DEFAULT 'demo' CHECK(status IN ('demo','pending','sent','failed'));
+      ALTER TABLE outbox ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE outbox ADD COLUMN error TEXT NOT NULL DEFAULT '';
+      ALTER TABLE outbox ADD COLUMN sent_at TEXT;`);
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS outbox_pending ON outbox(status, id)');
   db.prepare("INSERT OR IGNORE INTO app_settings(key,value) VALUES('installation_id',?)").run(randomUUID());
   if (!db.prepare('SELECT id FROM users LIMIT 1').get()) seed(db, directory);
   else {seedProgramIfNeeded(db);seedSurveyIfNeeded(db);seedFormIfNeeded(db);seedPartnerIfNeeded(db);seedCatalogIfNeeded(db);seedAnnouncementsIfNeeded(db);}

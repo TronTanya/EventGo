@@ -17,7 +17,7 @@ import { openDatabase } from '../db.mjs';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 let processHandle,base,directory;
 async function start(){
- processHandle=spawn(process.execPath,['--no-warnings',join(root,'server.mjs')],{env:{...process.env,PORT:'0',HOST:'127.0.0.1',EVENTGO_DATA_DIR:directory,EVENTGO_SECRET_DIR:join(directory,'secrets'),OPENAI_API_KEY:'',OPENAI_MODEL:'',DEEPSEEK_API_KEY:'',DEEPSEEK_MODEL:'',EVENTGO_AI_PROVIDER:'openai'},stdio:['ignore','pipe','pipe'],windowsHide:true});
+ processHandle=spawn(process.execPath,['--no-warnings',join(root,'server.mjs')],{env:{...process.env,PORT:'0',HOST:'127.0.0.1',EVENTGO_DATA_DIR:directory,EVENTGO_SECRET_DIR:join(directory,'secrets'),OPENAI_API_KEY:'',OPENAI_MODEL:'',DEEPSEEK_API_KEY:'',DEEPSEEK_MODEL:'',EVENTGO_AI_PROVIDER:'openai',EVENTGO_SMTP_HOST:''},stdio:['ignore','pipe','pipe'],windowsHide:true});
  base=await new Promise((resolve,reject)=>{let out='';const timer=setTimeout(()=>reject(new Error('Server start timeout: '+out)),15000);processHandle.stdout.on('data',b=>{out+=b;const m=out.match(/http:\/\/127\.0\.0\.1:\d+/);if(m){clearTimeout(timer);resolve(m[0]);}});processHandle.stderr.on('data',b=>out+=b);processHandle.once('exit',code=>{clearTimeout(timer);reject(new Error('Server exited '+code+': '+out));});});
 }
 async function stop(){if(processHandle&&processHandle.exitCode===null){processHandle.kill();await once(processHandle,'exit');}}

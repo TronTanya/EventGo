@@ -6,6 +6,8 @@ services:
       POSTGRES_USER: eventgo
       POSTGRES_PASSWORD: eventgo
       POSTGRES_DB: eventgo
+    ports:
+      - "127.0.0.1:5433:5432"
     volumes:
       - eventgo_pg:/var/lib/postgresql/data
     healthcheck:
@@ -25,6 +27,13 @@ services:
       PORT: "3000"
       EVENTGO_NO_BROWSER: "1"
       EVENTGO_DATA_DIR: /data
+      EVENTGO_SMTP_HOST: ${EVENTGO_SMTP_HOST:-}
+      EVENTGO_SMTP_PORT: ${EVENTGO_SMTP_PORT:-465}
+      EVENTGO_SMTP_SECURITY: ${EVENTGO_SMTP_SECURITY:-}
+      EVENTGO_SMTP_USER: ${EVENTGO_SMTP_USER:-}
+      EVENTGO_SMTP_PASS: ${EVENTGO_SMTP_PASS:-}
+      EVENTGO_SMTP_FROM: ${EVENTGO_SMTP_FROM:-}
+      EVENTGO_SMTP_FROM_NAME: ${EVENTGO_SMTP_FROM_NAME:-EventGo}
     volumes:
       - eventgo_uploads:/data
     depends_on:
